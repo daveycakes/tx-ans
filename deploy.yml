@@ -28,6 +28,7 @@
         dest: "{{ app_dir }}"
         version: setup/about
         update: true
+        force: true
       become_user: "{{ strapi_user }}"
       register: git_result
 
