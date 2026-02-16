@@ -1,0 +1,109 @@
+- name: Deploy Strapi project from Codeberg
+  hosts: myhosts
+  become: true
+  vars_files:
+    - vars/secrets.yml
+  vars:
+    repo_url: "https://{{ git_user }}:{{ git_password }}@codeberg.org/Tribe-X/tribe-x-cms.git"
+    app_dir: /opt/strapi
+    node_env: "production"
+    strapi_user: strapi
+    strapi_group: strapi
+    db_host: "127.0.0.1"
+    db_port: "5432"
+    db_name: strapi_tx
+    db_user: strapi_tx_u
+  tasks:
+    - name: Ensure application directory exists
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ strapi_user }}"
+        group: "{{ strapi_group }}"
+        mode: '0755'
+
+    - name: Clone or update the repository
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: setup/about
+        update: true
+      become_user: "{{ strapi_user }}"
+      register: git_result
+
+    - name: Set ownership on application directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ strapi_user }}"
+        group: "{{ strapi_group }}"
+        recurse: true
+
+    - name: Install npm dependencies
+      community.general.npm:
+        path: "{{ app_dir }}"
+        state: present
+        production: true
+      become_user: "{{ strapi_user }}"
+      environment:
+        NODE_ENV: "{{ node_env }}"
+      register: npm_result
+
+    - name: Build Strapi and run migrations
+      ansible.builtin.command:
+        cmd: npm run build
+        chdir: "{{ app_dir }}"
+      become_user: "{{ strapi_user }}"
+      environment:
+        NODE_ENV: "{{ node_env }}"
+      when: git_result.changed or npm_result.changed
+
+    - name: Create PM2 ecosystem file
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/ecosystem.config.js"
+        content: |
+          module.exports = {
+            apps: [{
+              name: 'strapi',
+              cwd: '{{ app_dir }}',
+              script: 'npm',
+              args: 'start',
+              env: {
+                NODE_ENV: 'production',
+                DATABASE_CLIENT: 'postgres',
+                DATABASE_HOST: '{{ db_host }}',
+                DATABASE_PORT: '{{ db_port }}',
+                DATABASE_NAME: '{{ db_name }}',
+                DATABASE_USERNAME: '{{ db_user }}',
+                DATABASE_PASSWORD: '{{ db_password }}',
+                DATABASE_SSL: 'false',
+                APP_KEYS: '{{ app_keys }}',
+                API_TOKEN_SALT: '{{ api_token_salt }}',
+                ADMIN_JWT_SECRET: '{{ admin_jwt_secret }}',
+                JWT_SECRET: '{{ jwt_secret }}',
+                TRANSFER_TOKEN_SALT: '{{ transfer_token_salt }}',
+              },
+              exp_backoff_restart_delay: 100,
+              max_memory_restart: '1G',
+            }]
+          };
+        owner: "{{ strapi_user }}"
+        group: "{{ strapi_group }}"
+        mode: '0600'
+
+    - name: Start or reload Strapi with PM2
+      ansible.builtin.shell: |
+        pm2 describe strapi > /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+          pm2 reload ecosystem.config.js
+          echo "reloaded"
+        else
+          pm2 start ecosystem.config.js
+          echo "started"
+        fi
+        pm2 save
+      args:
+        chdir: "{{ app_dir }}"
+      become_user: "{{ strapi_user }}"
+      register: pm2_result
+      changed_when: "'started' in pm2_result.stdout"
