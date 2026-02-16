@@ -49,6 +49,13 @@
         NODE_ENV: "{{ node_env }}"
       register: npm_result
 
+    - name: Install PostgreSQL driver
+      community.general.npm:
+        path: "{{ app_dir }}"
+        name: pg
+        state: present
+      become_user: "{{ strapi_user }}"
+
     - name: Build Strapi and run migrations
       ansible.builtin.command:
         cmd: npm run build

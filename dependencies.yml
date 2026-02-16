@@ -6,7 +6,7 @@
   vars:
     db_name: strapi_tx
     db_user: strapi_tx_u
-    domain_name: txcms.dicefriendly.com
+    domain_name: tx-strapi.dicefriendly.com
     strapi_port: 1337
     strapi_user: strapi
     strapi_group: strapi
